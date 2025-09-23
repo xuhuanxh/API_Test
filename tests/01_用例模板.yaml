@@ -1,0 +1,62 @@
+config: # 测试信息
+  baseurl: "http://127.0.0.1:8080"  # BASEURL
+  timeout: 30.0
+  headers:  # 提前设置请求头
+    Accept: application/json, text/javascript, */*; q=0.01
+    Accept-Encoding: gzip, deflate, br
+    Accept-Language: zh-CN,zh;q=0.9
+    Connection: keep-alive
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36
+    cookies:
+    X-Requested-With: XMLHttpRequest
+variable:   # 预先设置一些全局变量等等内容
+  none : none
+tests:   # 用例部分
+  test_send_code:   # 用例名称
+    description: "发送验证码"    # 用例描述
+    method: post    # 请求方法
+    route: /api/user/send_code/   # 请求路径
+    parameters:  # 参数化用例
+      - username: username
+        password: password
+        expectcode: 200  # 正确账号预期200
+        resultcheck: "发送成功"  # 从response.text中提取，判定方式：resultcheck in r.text
+        regularcheck: "发送成功"  # 正则匹配  判定方式：re.findall(regularcheck, r.text)
+        description: "正确账号密码登录"   # 为每一条参数化用例增加描述，并作为用例标题
+
+      - username: wrong-username
+        password: wrong_pwd
+        expectcode: 401  # 错误账号预期401
+        resultcheck:  "success"
+        regularcheck:  "user_id: (\\d+)"  # 提取用户ID
+    RequestData:  # 请求内容
+      data:    # 请求参数，data=form-data json=json params=params
+        username: ${username}   # 参数化实现，从parameters中提取，有几个参数则生成几条用例
+        password: ${password}
+      headers: # 可以在每条用例中新增headers
+        Cookie: "sessionid=${sessionid}"  # 比如在上一条用例中，提取到了sessionid，则可以新增进去
+    Validate:  # 断言
+      expectcode: ${expectcode}  # response_code断言
+      resultcheck: ${resultcheck} # 参数化resultcheck断言
+      regularcheck: ${regularcheck}  # 参数化regularcheck断言
+    Extract:  # 需要提取的值  提取逻辑：先从headers找，没有再找cookies，最后再用正则去r.text中匹配
+      - data
+
+  test_email_login:
+    description: "邮箱登录"
+    method: post
+    route: /api/user/login/
+    RequestData:
+      json:
+        "login_type": "email"
+        "account" : "xxx@qq.com"
+        "code": ${data}
+      headers:
+        Cookie: "sessionid=${sessionid}"
+    Validate:
+      expectcode: 200
+    Extract:
+      - data.token
+      - sessionid
+
+
