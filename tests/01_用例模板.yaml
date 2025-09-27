@@ -9,37 +9,70 @@ config: # 测试信息
     User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36
     cookies:
     X-Requested-With: XMLHttpRequest
-variable:   # 预先设置一些全局变量等等内容
+# 预先设置一些全局变量等等内容
+variable:
   none : none
 tests:   # 用例部分
   test_send_code:   # 用例名称
     description: "发送验证码"    # 用例描述
-    method: post    # 请求方法
-    route: /api/user/send_code/   # 请求路径
-    parameters:  # 参数化用例
-      - username: username
+    # 前置数据库操作
+    setup_db: "SELECT username FROM ti_user"
+    extract_db:
+      - usernames: ""  # 将结果提取为列表(提取所有信息)
+    # redis操作
+    redis:
+      # 前置redis操作
+      setup_redis: "HGET user:${user_id} balance"
+      # redis提取数据
+      extract_redis:
+        - user_balance: ""  # 提取所有结果
+      # 后置redis操作
+      teardown_redis: "HSET user:${user_id} balance 0"
+    # HTTP请求
+    method: post
+    route: /api/user/send_code/
+    # 参数化用例实现
+    parameters:
+      - username: {usernames.0} # 根据索引获取不同的参数值
         password: password
-        expectcode: 200  # 正确账号预期200
-        resultcheck: "发送成功"  # 从response.text中提取，判定方式：resultcheck in r.text
-        regularcheck: "发送成功"  # 正则匹配  判定方式：re.findall(regularcheck, r.text)
-        description: "正确账号密码登录"   # 为每一条参数化用例增加描述，并作为用例标题
+        # 正确账号预期200
+        expectcode: 200
+        # 从response.text中提取，判定方式：resultcheck in r.text
+        resultcheck: "发送成功"
+        # 正则匹配  判定方式：re.findall(regularcheck, r.text)
+        regularcheck: "发送成功"
+        # 为每一条参数化用例增加描述，并作为用例标题
+        description: "正确账号密码登录"
 
-      - username: wrong-username
+      - username: wrong_username
         password: wrong_pwd
-        expectcode: 401  # 错误账号预期401
+         # 错误账号预期401
+        expectcode: 401
         resultcheck:  "success"
-        regularcheck:  "user_id: (\\d+)"  # 提取用户ID
-    RequestData:  # 请求内容
-      data:    # 请求参数，data=form-data json=json params=params
-        username: ${username}   # 参数化实现，从parameters中提取，有几个参数则生成几条用例
+        # 提取用户ID
+        regularcheck:  "user_id: (\\d+)"
+    # 请求内容
+    RequestData:
+      # 请求参数，data=form-data json=json params=params
+      data:
+        # 参数化实现，从parameters中提取，有几个参数则生成几条用例
+        username: ${username}
         password: ${password}
-      headers: # 可以在每条用例中新增headers
-        Cookie: "sessionid=${sessionid}"  # 比如在上一条用例中，提取到了sessionid，则可以新增进去
-    Validate:  # 断言
-      expectcode: ${expectcode}  # response_code断言
-      resultcheck: ${resultcheck} # 参数化resultcheck断言
-      regularcheck: ${regularcheck}  # 参数化regularcheck断言
-    Extract:  # 需要提取的值  提取逻辑：先从headers找，没有再找cookies，最后再用正则去r.text中匹配
+      # 可以在每条用例中新增headers
+      headers:
+        # 比如在上一条用例中，提取到了sessionid，则可以新增进去
+        Cookie: "sessionid=${sessionid}"
+    #后置数据库处理
+    teardown_db: "UPDATE XXXX"
+    # 断言
+    Validate:
+      # response_code断言
+      expectcode: ${expectcode}
+      # 参数化resultcheck断言
+      resultcheck: ${resultcheck}
+      # 参数化regularcheck断言
+      regularcheck: ${regularcheck}
+    Extract:  # 需要提取的值  提取逻辑：先从headers找，没有再找cookies，最后再去r.text中匹配
       - data
 
   test_email_login:
@@ -58,5 +91,3 @@ tests:   # 用例部分
     Extract:
       - data.token
       - sessionid
-
-
