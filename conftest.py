@@ -6,11 +6,10 @@ import typing as t
 import yaml
 import pytest
 from requests import Response
-from _pytest.nodes import Node
-from common.cache import cache
 from common.db import DatabaseClient
+from common.redis_client import RedisClient
+from common.cache import cache
 from common.json import dumps, loads
-from common.redis import RedisClient
 from common.request import HttpRequest
 from common.regular import findalls, sub_var
 from common.result import get_result, check_results
@@ -29,7 +28,7 @@ def pytest_addoption(parser):
         "--env",
         action="store",
         default="dev",  # 默认使用开发环境
-        help="指定测试环境，可选值：C2C/C2C_BOSS/Qspace"
+        help="指定测试环境，可选值：XXX/XXXX/XXXXX"
     )
 
 @pytest.fixture(scope="session")
@@ -127,19 +126,9 @@ class YamlTest(pytest.Item):
         self.request = HttpRequest(exception=(RequestException, Exception))
         self.db_client = None
         self.redis_client = None
-        self.pytest_request = self._get_request_from_parent(parent)
-
-    def _get_request_from_parent(self, parent: Node) -> pytest.FixtureRequest:
-        """从父节点获取pytest请求对象"""
-        # 递归查找请求对象（处理嵌套节点结构）
-        if hasattr(parent, 'request'):
-            return parent.request
-        if parent.parent is not None:
-            return self._get_request_from_parent(parent.parent)
-        raise RuntimeError("无法从父节点获取pytest请求对象")
 
     def runtest(self):
-        """
+        """Some custom test execution (dumb example follows).
         执行测试用例，发送请求并处理响应。
         """
         if self.param:
@@ -162,101 +151,106 @@ class YamlTest(pytest.Item):
         # 获取环境配置并覆盖baseurl
         env_config = ENVIRONMENTS[env]
         cache.set("baseurl", env_config["baseurl"])
-        # 初始化客户端
         self._init_clients(env_config)
         try:
-            # 执行前置数据库操作
             self._exec_db_operations("setup_db")
-            # 执行前置Redis操作
             self._exec_redis_operations("setup_redis")
-
             # 发送请求
-            r, processed_kwargs = self.request.send_request(**self.spec)
+            r, processed_kwargs = self.request.send_request(** self.spec)
             # 处理响应
             self.response_handle(r, processed_kwargs.get('Validate'), processed_kwargs.get('Extract'))
-
-            # 执行后置数据库操作
             self._exec_db_operations("teardown_db")
-            # 执行后置Redis操作
             self._exec_redis_operations("teardown_redis")
-
         finally:
-            # 关闭客户端连接
             self._close_clients()
 
     def _init_clients(self, env_config):
-        """初始化数据库和Redis客户端"""
-        # 初始化数据库客户端
         if "db" in env_config:
-            self.db_client = DatabaseClient(env_config["db"])
+            self.db_client = DatabaseClient(lambda: env_config["db"])
             logger.info("数据库客户端初始化成功")
 
-        # 初始化Redis客户端
         if "redis" in env_config:
             self.redis_client = RedisClient(env_config["redis"])
             logger.info("Redis客户端初始化成功")
 
-    def _exec_db_operations(self, operation_type: str):
-        """执行数据库前置/后置操作"""
-        if not self.db_client or operation_type not in self.param:
+    def _exec_db_operations(self, operation_type):
+        if not self.db_client:
             return
-        db_config = self.param[operation_type]
-        if not db_config:
+        operation_sql = self.param.get(operation_type) if self.param else self.spec.get(operation_type)
+        if not operation_sql:
             return
-        sql = sub_var(cache.data, db_config)
-        logger.info(f"执行{operation_type}, sql={sql}")
-        result = self.db_client.execute(sql)
-        logger.debug(f"执行结果{result}")
-        if extract_db := self.spec.get('extract_db'):
-            for item in extract_db:
-                for cache_key, db_key in item.items():
-                    value = self._extract_db_value(result, db_key)
-                    if value is not None:
-                        cache.set(cache_key, value)
-            logger.debug(f"数据库提取后缓存:{cache.data}")
 
-    def _exec_redis_operations(self, operation_type: str):
-        """执行redis前置/后置操作"""
-        if not self.redis_client or operation_type not in self.spec.get('redis', {}):
+        sql = sub_var(cache.data, operation_sql)
+        logger.info(f"执行{operation_type} SQL: {sql}")
+
+        try:
+            result = self.db_client.execute(sql)
+            logger.debug(f"{operation_type} 执行结果: {result}")
+        except Exception as e:
+            logger.error(f"{operation_type} 执行失败: {str(e)}")
+            raise
+        self._extract_db_result(result)
+
+    def _extract_db_result(self, db_result):
+        extract_config = self.spec.get("extract_db")
+        if not extract_config or not db_result:
             return
-        redis_config = self.spec['redis'][operation_type]
-        if not redis_config:
+
+        for item in extract_config:
+            for cache_key, extract_rule in item.items():
+                # 支持提取全部结果或指定字段（如"id"取所有id字段，""取全部）
+                if extract_rule == "":
+                    cache.set(cache_key, db_result)
+                else:
+                    # 提取指定字段（适用于字典列表结果）
+                    extracted = [row.get(extract_rule) for row in db_result if row.get(extract_rule)]
+                    cache.set(cache_key, extracted)
+        logger.debug(f"数据库提取后缓存: {cache.data}")
+
+    def _exec_redis_operations(self, operation_type):
+        if not self.redis_client:
             return
-        cmd = sub_var(cache.data, redis_config)
-        logger.info(f"执行redis{operation_type}, Redis命令:{cmd}")
-        cmd_parts = cmd.split()
+        redis_spec = self.spec.get("redis", {})
+        operation_cmd = redis_spec.get(operation_type)
+        if not operation_cmd:
+            return
+
+        cmd = sub_var(cache.data, operation_cmd)
+        cmd_parts = cmd.split()  # 拆分命令（如"HGET user:123 balance"拆分为列表）
         if not cmd_parts:
-            raise ValueError("redis命令不能为空")
-        result = self.redis_client.execute(*cmd_parts)
-        logger.debug(f"执行结果{result}")
-        if extract_redis := self.spec["redis"].get("extract_redis"):
-            for item in extract_redis:
-                for cache_key, redis_key in item.items():
-                    value = self._extract_redis_value(result, redis_key)
-                    if value is not None:
-                        cache.set(cache_key, value)
-            logger.debug(f"redis提取后缓存:{result}")
+            logger.warning("Redis命令为空，跳过执行")
+            return
+        logger.info(f"执行{operation_type} Redis命令: {cmd}")
 
-    def _extract_db_value(self, result: t.Any, key: str) -> t.Any:
-        """提取数据库结果中的值"""
-        if isinstance(result, list) and result:
-            try:
-                index = int(key)
-                return result[index] if index < len(result) else None
-            except (ValueError, IndexError):
-                return result[0].get(key) if isinstance(result[0], dict) else None
-        return result
+        # 执行Redis命令并处理结果
+        try:
+            result = self.redis_client.execute_command(*cmd_parts)
+            logger.debug(f"{operation_type} 执行结果: {result}")
+        except Exception as e:
+            logger.error(f"{operation_type} 执行失败: {str(e)}")
+            raise
 
-    def _extract_redis_value(self, result: t.Any, key: str) -> t.Any:
-        """提取Redis结果中的值"""
-        if isinstance(result, dict):
-            return result.get(key)
-        elif isinstance(result, list):
-            try:
-                return result[int(key)]
-            except (ValueError, IndexError):
-                return None
-        return result if key == "" else None
+        # 提取结果到缓存（extract_redis配置）
+        self._extract_redis_result(result)
+
+    def _extract_redis_result(self, redis_result):
+        redis_spec = self.spec.get("redis", {})
+        extract_config = redis_spec.get("extract_redis")
+        if not extract_config or redis_result is None:
+            return
+
+        for item in extract_config:
+            for cache_key, extract_rule in item.items():
+                cache.set(cache_key, redis_result)
+        logger.debug(f"Redis提取后缓存: {cache.data}")
+
+    def _close_clients(self):
+        if self.db_client:
+            self.db_client.close()
+            logger.info("数据库连接已关闭")
+        if self.redis_client:
+            self.redis_client.close()
+            logger.info("Redis连接已关闭")
 
     def response_handle(self, r: Response, validate: t.Dict, extract: t.List):
         """Handling of responses
@@ -269,15 +263,6 @@ class YamlTest(pytest.Item):
         if extract:
             get_result(r, extract)
         # logger.debug(f"提取变量后缓存内容: {cache}")
-
-    def _close_clients(self):
-        """关闭数据库和Redis连接"""
-        if self.db_client:
-            self.db_client.close()
-            logger.info("数据库连接已关闭")
-        if self.redis_client:
-            self.redis_client.close()
-            logger.info("Redis连接已关闭")
 
     def repr_failure(self, excinfo):
         """
