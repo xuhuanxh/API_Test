@@ -11,7 +11,7 @@ from common.redis_client import RedisClient
 from common.cache import cache
 from common.json import dumps, loads
 from common.request import HttpRequest
-from common.regular import findalls, sub_var
+from common.regular import findalls, sub_var, sub_sql_var, sub_redis_var
 from common.result import get_result, check_results
 from common.exceptions import YamlException, RequestException
 from utils.logger import logger, log_handler
@@ -90,11 +90,11 @@ class YamlFile(pytest.File):
                     logger.info(f"用例 {name} 解析到 {len(parameters)} 个参数组，将生成 {len(parameters)} 条独立用例")
                     for i, param in enumerate(parameters):
                         # 生成用例名称
-                        param_desc = param.get('description')
+                        param_desc = param.get('case_description') or param.get('description')
                         if param_desc:
                             test_name = param_desc
                         else:
-                            test_name = f"{spec.get('description') or name}_param_{i}"
+                            test_name = f"{spec.get('case_description') or spec.get('description') or name}_param_{i}"
                         logger.debug(f"生成独立用例：{test_name}，参数：{param}")
                         yield YamlTest.from_parent(
                             self,
@@ -105,7 +105,7 @@ class YamlFile(pytest.File):
                 else:
                     yield YamlTest.from_parent(
                         self,
-                        name=spec.get('description') or name,
+                        name=spec.get('case_description') or spec.get('description') or name,
                         spec=spec,
                         param=None
                     )
@@ -173,6 +173,9 @@ class YamlTest(pytest.Item):
             self.redis_client = RedisClient(env_config["redis"])
             logger.info("Redis客户端初始化成功")
 
+        else:
+            pass
+
     def _exec_db_operations(self, operation_type):
         if not self.db_client:
             return
@@ -180,15 +183,18 @@ class YamlTest(pytest.Item):
         if not operation_sql:
             return
 
-        sql = sub_var(cache.data, operation_sql)
-        logger.info(f"执行{operation_type} SQL: {sql}")
+        sql_list = [operation_sql] if isinstance(operation_sql, str) else operation_sql
 
-        try:
-            result = self.db_client.execute(sql)
-            logger.debug(f"{operation_type} 执行结果: {result}")
-        except Exception as e:
-            logger.error(f"{operation_type} 执行失败: {str(e)}")
-            raise
+        for sql in sql_list:
+            processed_sql = sub_sql_var(cache.data, sql)
+            logger.info(f"执行{operation_type} SQL: {processed_sql}")
+
+            try:
+                result = self.db_client.execute(processed_sql)
+                logger.debug(f"{operation_type} 执行结果: {result}")
+            except Exception as e:
+                logger.error(f"{operation_type} 执行失败 (SQL: {processed_sql}): {str(e)}")
+                raise
         self._extract_db_result(result)
 
     def _extract_db_result(self, db_result):
@@ -215,7 +221,7 @@ class YamlTest(pytest.Item):
         if not operation_cmd:
             return
 
-        cmd = sub_var(cache.data, operation_cmd)
+        cmd = sub_redis_var(cache.data, operation_cmd)
         cmd_parts = cmd.split()  # 拆分命令（如"HGET user:123 balance"拆分为列表）
         if not cmd_parts:
             logger.warning("Redis命令为空，跳过执行")

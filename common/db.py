@@ -33,7 +33,7 @@ class DatabaseClient:
         try:
             if not self.connection or not self.connection.is_connected():
                 self.connect()
-            logger.debug(f"执行sql:{sql}, 参数:{params}")
+            # logger.debug(f"执行sql:{sql}, 参数:{params}")
             self.cursor.execute(sql, params or {})
             # 根据sql的类型,判断是否需要提交事务
             if sql.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'DROP')):
@@ -51,6 +51,21 @@ class DatabaseClient:
             self.cursor.close()
         if self.connection and self.connection.is_connected():
             self.connection.close()
-            logger.info("数据库连接已关闭")
+            # logger.info("数据库连接已关闭")
 
 
+if __name__ == '__main__':
+    db = {
+        "host": "192.168.1.203",
+        "port": 3306,
+        "user": "root",
+        "password": "Dly20160607",
+        "database": "ti_back",
+        "charset": "utf8mb4"
+    }
+    client = DatabaseClient(lambda: db)
+    result = client.execute("select * from ti_user")
+    print(result)
+    for i in result:
+        print(i["username"])
+    client.close()

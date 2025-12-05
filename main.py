@@ -9,9 +9,9 @@ def main():
     """
     # 定义要执行的命令列表
     cmd_all = (
-        "source env/bin/activate",  # 激活虚拟环境
-        "pytest --env Qspace -s tests/xxx.yaml --alluredir allure-results --clean-alluredir",  # 运行pytest测试并指定Allure结果目录
-        "cp environment.properties allure-results",  # 复制环境配置文件到Allure结果目录
+        # "source env/bin/activate",  # 激活虚拟环境
+        "pytest --env Qspace -s tests/Qspace/02环境/05环境管理/test_37_1_环境_环境管理_创建环境.yaml --alluredir allure-results --clean-alluredir",  # 运行pytest测试并指定Allure结果目录
+        # "cp environment.properties allure-results",  # 复制环境配置文件到Allure结果目录
         "allure generate allure-results -c -o allure-report --lang zh ",  # 生成Allure报告
         # "allure open allure-report"  # 打开Allure报告（注释掉，可根据需要启用）
     )

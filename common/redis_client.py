@@ -26,7 +26,7 @@ class RedisClient:
             raise
 
     def execute_command(self, *args, **kwargs):
-        """执行redis执行"""
+        """执行redis命令"""
         try:
             return self.client.execute_command(*args, **kwargs)
         except Exception as e:
@@ -37,5 +37,19 @@ class RedisClient:
         """关闭redis连接"""
         if self.client:
             self.client.close()
-            logger.info("Redis连接关闭")
+            # logger.info("Redis连接关闭")
 
+
+if __name__ == '__main__':
+    test_redis_config = {
+        "host": "192.168.1.101",
+        "port": 6379,
+        "password": "Dly20160607",
+        "db": 0
+    }
+    client = RedisClient(test_redis_config)
+    result = client.execute_command("SET", "testkey", "test")
+    print(result)
+    result = client.execute_command("GET", "testkey")
+    print(result)
+    client.close()

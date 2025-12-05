@@ -7,7 +7,7 @@ import typing as t
 from common.cache import cache
 from common.json import is_json_str, loads, dumps
 from utils.logger import logger
-
+from utils.faker_utils import *
 
 def _get_nested_value(obj: t.Union[dict, list, t.Any], path: str) -> t.Any:
     """
@@ -47,6 +47,38 @@ def findalls(string: t.Text) -> t.Dict[t.Text, t.Any]:
     keys = key_pattern.findall(string)
     res = {}
     for key in keys:
+        if key.startswith('faker.'):
+            func_name = key.split('faker.')[1].split('(')[0]
+            args = re.findall(r"\((.*?)\)", key)[0].split(",") if "(" in key else []
+            args = [arg.strip() for arg in args if arg.strip()]
+            faker_funcs = {
+                "phone": random_phone,
+                "name": random_name,
+                "email": random_email,
+                "random_int": random_int,
+                "random_str": random_str,
+                "address": random_address,
+                "ssn": random_ssn,
+                "username": random_username,
+                "password": random_password,
+                "birthdate": random_birthdate,
+                "sex": random_sex,
+                "ip": random_ipv4,
+                "domain": random_domain,
+                "company": random_company,
+                "price": random_price
+            }
+
+            if func_name in faker_funcs:
+                # 处理带参数的调用
+                if func_name == "random_int" and len(args) == 2:
+                    res[key] = random_int(int(args[0]), int(args[1]))
+                elif func_name == "random_str" and len(args) == 1:
+                    res[key] = random_str(int(args[0]))
+                else:
+                    res[key] = faker_funcs[func_name]()
+            continue
+
         # 优先检查缓存中是否存在完整带点的键（如data.token）
         if '.' in key and cache.get(key) is not None:
             res[key] = cache.get(key)
@@ -63,19 +95,25 @@ def findalls(string: t.Text) -> t.Dict[t.Text, t.Any]:
         else:
             # 普通单键变量（如sessionid、type_id）
             res[key] = cache.get(key)
-    logger.debug("需要替换的变量：{}".format(res))
+    # logger.debug("需要替换的变量：{}".format(res))
     return res
 
 
 def sub_var(keys: t.Dict, string: t.Text) -> t.Text:
     """替换变量，自动处理JSON模板中的引号，确保类型正确"""
     res = string
+    is_log_printed = False
+    # 递归替换直到没有可替换的变量
     # 递归替换直到没有可替换的变量
     while True:
         # 查找当前字符串中剩余的变量
         remaining_vars = findalls(res)
         if not remaining_vars:
             break  # 无剩余变量，退出循环
+
+        if not is_log_printed:
+            logger.debug("需要替换的变量：{}".format(remaining_vars))
+            is_log_printed = True
 
         # 替换剩余变量
         for key, value in remaining_vars.items():
@@ -125,3 +163,52 @@ def get_var(key: t.Text, raw_str: t.Text) -> t.Text:
     logger.warning(f"raw_str_is_not_json_str: {raw_str}")
     _obj = re.compile(r'%s' % key).findall(raw_str)
     return _obj[0] if _obj else ""
+
+
+def sub_sql_var(keys: t.Dict, sql: t.Text) -> t.Text:
+    """
+    专门用于SQL语句的变量替换
+    """
+    res = sql
+    while True:
+        remaining_vars = findalls(res)  # 复用变量查找逻辑
+        if not remaining_vars:
+            break
+
+        for key, value in remaining_vars.items():
+            pattern = re.compile(rf'\$\{{{re.escape(key)}}}')  # 简化正则（SQL无需处理引号自动移除）
+
+            # 1. 处理空值
+            if value is None:
+                value_str = "NULL"  # SQL空值用NULL（无引号）
+            # 2. 处理数值类型（整数/浮点数）
+            elif isinstance(value, (int, float)):
+                value_str = str(value)  # 数值直接拼接，不加引号
+            # 3. 处理布尔类型（SQL通常用1/0表示）
+            elif isinstance(value, bool):
+                value_str = "1" if value else "0"
+            # 4. 处理字符串类型（转义单引号）
+            else:
+                # SQL字符串中的单引号需要转义为两个单引号（如 ' 转 ''）
+                escaped_value = str(value).replace("'", "''")
+                value_str = f"'{escaped_value}'"  # 字符串必须用单引号包裹
+
+            res = pattern.sub(value_str, res)
+
+    logger.debug(f"SQL变量替换完成: {res}")
+    return res
+
+def sub_redis_var(keys: t.Dict, cmd: t.Text) -> t.Text:
+    """专门用于Redis命令的变量替换"""
+    res = cmd
+    while True:
+        remaining_vars = findalls(res)  # 复用变量查找逻辑
+        if not remaining_vars:
+            break
+        for key, value in remaining_vars.items():
+            pattern = re.compile(rf'\$\{{{re.escape(key)}}}')
+            # Redis命令参数通常直接拼接，无需单引号（字符串也可直接使用）
+            value_str = str(value) if value is not None else ""
+            res = pattern.sub(value_str, res)
+    logger.debug(f"Redis命令替换完成: {res}")
+    return res

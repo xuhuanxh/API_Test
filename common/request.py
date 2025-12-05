@@ -64,12 +64,13 @@ class HttpRequest(Session):
             if is_sub := findalls(kwargs_str):
                 # 替换变量
                 kwargs = loads(sub_var(is_sub, kwargs_str))
+            # logger.info(f"变量替换后 route: {kwargs.get('route')}")
             filtered_kwargs = {
                 "method": kwargs.get("method"),
                 "route": kwargs.get("route"),
                 "RequestData": kwargs.get("RequestData")  # 实际发送的参数（headers/json/params等）
             }
-            logger.info("Request Config: {}".format(filtered_kwargs))
+            logger.info("实际请求数据: {}".format(filtered_kwargs))
             # 合并请求数据
             request_data = HttpRequest.mergedict(kwargs.get('RequestData'),
                                                  headers=cache.get('headers'),
@@ -96,16 +97,16 @@ class HttpRequest(Session):
                 response_str = response.text
 
             description_html += f"""
-                    <font color=red>响应内容:</font>{response_str}<br/>
+                    <font color=red>响应内容:</font><br/>
+                    <pre>{response_str}</pre><br/>
                     """
             allure.dynamic.description_html(description_html)  # 更新Allure报告描述
             # 记录请求结果
-            logger.info("Request Result: {}{}".format(response, response.text))
+            logger.info("请求结果: {}{}".format(response, response.text))
             return response, kwargs
         except self.exception as e:
             # 记录异常信息
             logger.exception(format(e))
-            # 抛出异常
             raise e
 
     def dispatch(self, method: t.Text, *args: t.Union[t.List, t.Tuple], **kwargs: t.Dict) -> Response:

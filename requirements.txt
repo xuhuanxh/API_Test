@@ -1,7 +1,8 @@
 allure_python_commons==2.15.0
 jsonpath==0.82.2
+mysql_connector_repackaged==0.3.1
 pytest==8.4.1
 PyYAML==6.0.2
-PyYAML==6.0.2
+PyYAML==6.0.3
 Requests==2.32.5
 urllib3==2.5.0
