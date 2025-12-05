@@ -19,6 +19,7 @@ tests:   # 用例部分
     setup_db: "SELECT username FROM ti_user"
     extract_db:
       - usernames: ""  # 将结果提取为列表(提取所有信息)
+      # - usernames: "username"   提起username列
     # redis操作
     redis:
       # 前置redis操作
@@ -91,3 +92,41 @@ tests:   # 用例部分
     Extract:
       - data.token
       - sessionid
+
+
+
+# 参数化用例格式嵌套
+#  test_get_address_info_error:
+#    description: "异常创建商品"
+#    method: post
+#    route: /api/goods/created/
+#    parameters:
+#      - type_id: ""
+#        title: "12-04"
+#        price: 100.00
+#        detail: "test_test1111111111"
+#        delivery_method: 0
+#        all_count: 100
+#        image_objs:
+#          - image_url: "www.baidu.com"
+#            is_main: 1
+#        expectcode: 200
+#        resultcheck: "false"
+#        description: '12-04—type_id为空字符串'
+#    RequestData:
+#      headers:
+#        Authorization: TOKEN ${data.token}
+#      json:
+#        type_id: ${type_id}
+#        title: ${title}
+#        price: ${price}
+#        detail: ${detail}
+#        delivery_method: ${delivery_method}
+#        all_count: ${all_count}
+#        image_objs:
+#          - image_url: ${image_objs.0.image_url}  # 嵌套
+#            is_main: ${image_objs.0.is_main}
+#    Validate:
+#      expectcode: ${expectcode}
+#      resultcheck: ${resultcheck}
+#    Extract:
